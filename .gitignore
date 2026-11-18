@@ -1,9 +1,5 @@
-ELF
-HBC
-wiki
-obj
-mame4wii_roms
-mame4wii_snap
-*.dol
+# build output
+/dist/
 *.elf
-build
+*.dol
+*.map

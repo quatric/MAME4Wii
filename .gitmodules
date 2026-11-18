@@ -1,0 +1,14 @@
+[submodule "mame"]
+	path = mame
+	url = https://github.com/mamedev/mame.git
+	shallow = true
+	ignore = dirty
+[submodule "3rdparty/libwiiinput"]
+	path = 3rdparty/libwiiinput
+	url = https://github.com/quatric/libwiiinput.git
+[submodule "3rdparty/libwiiupdate"]
+	path = 3rdparty/libwiiupdate
+	url = https://github.com/quatric/libwiiupdate.git
+[submodule "3rdparty/libwiiosk"]
+	path = 3rdparty/libwiiosk
+	url = https://github.com/quatric/libwiiosk.git

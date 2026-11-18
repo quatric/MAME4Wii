@@ -1,0 +1,8 @@
+# description: Capcom
+# Capcom boards up to CPS-2 (driver source files under src/mame/)
+capcom/1942.cpp
+capcom/1943.cpp
+capcom/commando.cpp
+capcom/gng.cpp
+capcom/cps1.cpp
+capcom/cps2.cpp

@@ -1,0 +1,19 @@
+# description: Classics
+# Early 1980s arcade hits (driver source files under src/mame/)
+pacman/pacman.cpp
+galaxian/galaxian.cpp
+namco/galaga.cpp
+nintendo/dkong.cpp
+nintendo/mario.cpp
+nintendo/popeye.cpp
+atari/centiped.cpp
+atari/asteroid.cpp
+atari/missile.cpp
+williams/williams.cpp
+phoenix/phoenix.cpp
+sega/zaxxon.cpp
+konami/gyruss.cpp
+konami/timeplt.cpp
+taito/arkanoid.cpp
+taito/bublbobl.cpp
+tecmo/bombjack.cpp

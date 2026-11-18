@@ -1,0 +1,9 @@
+# description: Sega, Konami, Irem & Technos
+# Late 1980s / early 1990s boards (driver source files under src/mame/)
+sega/system1.cpp
+sega/segas16a.cpp
+sega/segas16b.cpp
+technos/ddragon.cpp
+irem/m72.cpp
+konami/tmnt.cpp
+konami/simpsons.cpp

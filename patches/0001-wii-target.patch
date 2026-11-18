@@ -1,0 +1,957 @@
+diff --git a/makefile b/makefile
+index fe983b80..b4837038 100644
+--- a/makefile
++++ b/makefile
+@@ -399,6 +399,20 @@ ifndef NOASM
+ endif
+ endif
+ 
++# Nintendo Wii (devkitPPC)
++ifeq ($(TARGETOS),wii)
++ifndef DEVKITPPC
++$(error DEVKITPPC is not set)
++endif
++ARCHITECTURE :=
++PLATFORM := powerpc
++BIGENDIAN := 1
++NOASM := 1
++ifndef OSD
++OSD := wii
++endif
++endif
++
+ ifeq ($(findstring aarch64,$(UNAME)),aarch64)
+ ARCHITECTURE :=
+ endif
+@@ -440,7 +454,11 @@ else
+ PYTHON := $(PYTHON_EXECUTABLE)
+ endif
+ 
+-ifneq ($(TARGETOS),asmjs)
++ifeq ($(TARGETOS),wii)
++CC := $(SILENT)$(DEVKITPPC)/bin/powerpc-eabi-gcc
++LD := $(SILENT)$(DEVKITPPC)/bin/powerpc-eabi-g++
++CXX:= $(SILENT)$(DEVKITPPC)/bin/powerpc-eabi-g++
++else ifneq ($(TARGETOS),asmjs)
+ CC := $(SILENT)gcc
+ LD := $(SILENT)g++
+ CXX:= $(SILENT)g++
+@@ -1246,6 +1264,24 @@ endif
+ 	$(SILENT) $(MAKE) $(MAKEPARAMS) -C $(PROJECTDIR)/$(MAKETYPE)-asmjs config=$(CONFIG) precompile
+ 	$(SILENT) $(MAKE) $(MAKEPARAMS) -C $(PROJECTDIR)/$(MAKETYPE)-asmjs config=$(CONFIG)
+ 
++#-------------------------------------------------
++# Nintendo Wii (devkitPPC)
++#-------------------------------------------------
++
++$(PROJECTDIR)/$(MAKETYPE)-wii/Makefile: makefile $(SCRIPTS) $(GENIE)
++ifndef DEVKITPPC
++	$(error DEVKITPPC is not set)
++endif
++	$(SILENT) $(GENIE) $(PARAMS) $(TARGET_PARAMS) --gcc=wii --gcc_version=$(GCC_VERSION) $(MAKETYPE)
++
++.PHONY: wii
++wii: generate $(PROJECTDIR)/$(MAKETYPE)-wii/Makefile
++ifndef DEVKITPPC
++	$(error DEVKITPPC is not set)
++endif
++	$(SILENT) $(MAKE) $(MAKEPARAMS) -C $(PROJECTDIR)/$(MAKETYPE)-wii config=$(CONFIG) precompile
++	$(SILENT) $(MAKE) $(MAKEPARAMS) -C $(PROJECTDIR)/$(MAKETYPE)-wii config=$(CONFIG)
++
+ #-------------------------------------------------
+ # gmake-linux
+ #-------------------------------------------------
+diff --git a/scripts/genie.lua b/scripts/genie.lua
+index fa4a5bb6..ecaab3b4 100644
+--- a/scripts/genie.lua
++++ b/scripts/genie.lua
+@@ -153,6 +153,7 @@ newoption {
+ 		{ "macosx",        "OSX"                    },
+ 		{ "windows",       "Windows"                },
+ 		{ "haiku",         "Haiku"                  },
++		{ "wii",           "Nintendo Wii (devkitPPC)" },
+ 	},
+ }
+ 
+diff --git a/scripts/src/3rdparty.lua b/scripts/src/3rdparty.lua
+index 2d0cfe39..5ff98b1d 100755
+--- a/scripts/src/3rdparty.lua
++++ b/scripts/src/3rdparty.lua
+@@ -1094,6 +1094,19 @@ end
+ 	files {
+ 		MAME_DIR .. "3rdparty/sqlite3/sqlite3.c",
+ 	}
++
++	if _OPTIONS["targetos"]=="wii" then
++		-- no POSIX locking/mmap on the Wii: build without an OS layer
++		defines {
++			"SQLITE_OS_OTHER=1",
++			"SQLITE_THREADSAFE=0",
++			"SQLITE_OMIT_WAL",
++			"SQLITE_MAX_MMAP_SIZE=0",
++		}
++		files {
++			MAME_DIR .. "src/osd/wii/sqlite_wii.c",
++		}
++	end
+ else
+ links {
+ 	ext_lib("sqlite3"),
+@@ -1187,6 +1200,8 @@ end
+ end
+ 
+ 
++if _OPTIONS["NO_USE_BGFX"]~="1" then
++
+ --------------------------------------------------
+ -- BX library objects
+ --------------------------------------------------
+@@ -1590,6 +1605,9 @@ end
+ 	end
+ 
+ 
++end -- NO_USE_BGFX
++
++
+ --------------------------------------------------
+ -- PortAudio library objects
+ --------------------------------------------------
+@@ -1785,11 +1803,18 @@ end
+ 		MAME_DIR .. "3rdparty/linenoise",
+ 	}
+ 
+-	files {
+-		MAME_DIR .. "3rdparty/linenoise/linenoise.c",
+-		MAME_DIR .. "3rdparty/linenoise/stringbuf.c",
+-		MAME_DIR .. "3rdparty/linenoise/utf8.c",
+-	}
++	if _OPTIONS["targetos"]=="wii" then
++		-- no terminal on the Wii
++		files {
++			MAME_DIR .. "src/osd/wii/linenoise_wii.c",
++		}
++	else
++		files {
++			MAME_DIR .. "3rdparty/linenoise/linenoise.c",
++			MAME_DIR .. "3rdparty/linenoise/stringbuf.c",
++			MAME_DIR .. "3rdparty/linenoise/utf8.c",
++		}
++	end
+ 
+ 
+ --------------------------------------------------
+diff --git a/scripts/src/main.lua b/scripts/src/main.lua
+index 70946f47..0c2c1fc1 100644
+--- a/scripts/src/main.lua
++++ b/scripts/src/main.lua
+@@ -202,10 +202,14 @@ end
+ 			ext_lib("portmidi"),
+ 		}
+ 	end
++	if _OPTIONS["NO_USE_BGFX"]~="1" then
++		links {
++			"bgfx",
++			"bimg",
++			"bx",
++		}
++	end
+ 	links {
+-		"bgfx",
+-		"bimg",
+-		"bx",
+ 		"ocore_" .. _OPTIONS["osd"],
+ 	}
+ 
+diff --git a/scripts/src/osd/modules.lua b/scripts/src/osd/modules.lua
+index 97022e9f..e432bdd2 100644
+--- a/scripts/src/osd/modules.lua
++++ b/scripts/src/osd/modules.lua
+@@ -199,93 +199,99 @@ function osdmodulesbuild()
+ 		"BX_CONFIG_DEBUG=0",
+ 	}
+ 
+-	files {
+-		MAME_DIR .. "src/osd/modules/render/drawbgfx.cpp",
+-		MAME_DIR .. "src/osd/modules/render/aviwrite.cpp",
+-		MAME_DIR .. "src/osd/modules/render/aviwrite.h",
+-		MAME_DIR .. "src/osd/modules/render/bgfxutil.cpp",
+-		MAME_DIR .. "src/osd/modules/render/bgfxutil.h",
+-		MAME_DIR .. "src/osd/modules/render/binpacker.cpp",
+-		MAME_DIR .. "src/osd/modules/render/bgfx/blendreader.cpp",
+-		MAME_DIR .. "src/osd/modules/render/bgfx/blendreader.h",
+-		MAME_DIR .. "src/osd/modules/render/bgfx/chain.cpp",
+-		MAME_DIR .. "src/osd/modules/render/bgfx/chain.h",
+-		MAME_DIR .. "src/osd/modules/render/bgfx/chainentry.cpp",
+-		MAME_DIR .. "src/osd/modules/render/bgfx/chainentry.h",
+-		MAME_DIR .. "src/osd/modules/render/bgfx/chainentryreader.cpp",
+-		MAME_DIR .. "src/osd/modules/render/bgfx/chainentryreader.h",
+-		MAME_DIR .. "src/osd/modules/render/bgfx/chainmanager.cpp",
+-		MAME_DIR .. "src/osd/modules/render/bgfx/chainmanager.h",
+-		MAME_DIR .. "src/osd/modules/render/bgfx/chainreader.cpp",
+-		MAME_DIR .. "src/osd/modules/render/bgfx/chainreader.h",
+-		MAME_DIR .. "src/osd/modules/render/bgfx/clear.cpp",
+-		MAME_DIR .. "src/osd/modules/render/bgfx/clear.h",
+-		MAME_DIR .. "src/osd/modules/render/bgfx/clearreader.cpp",
+-		MAME_DIR .. "src/osd/modules/render/bgfx/clearreader.h",
+-		MAME_DIR .. "src/osd/modules/render/bgfx/cullreader.cpp",
+-		MAME_DIR .. "src/osd/modules/render/bgfx/cullreader.h",
+-		MAME_DIR .. "src/osd/modules/render/bgfx/depthreader.cpp",
+-		MAME_DIR .. "src/osd/modules/render/bgfx/depthreader.h",
+-		MAME_DIR .. "src/osd/modules/render/bgfx/effect.cpp",
+-		MAME_DIR .. "src/osd/modules/render/bgfx/effect.h",
+-		MAME_DIR .. "src/osd/modules/render/bgfx/effectmanager.cpp",
+-		MAME_DIR .. "src/osd/modules/render/bgfx/effectmanager.h",
+-		MAME_DIR .. "src/osd/modules/render/bgfx/effectreader.cpp",
+-		MAME_DIR .. "src/osd/modules/render/bgfx/effectreader.h",
+-		MAME_DIR .. "src/osd/modules/render/bgfx/entryuniformreader.cpp",
+-		MAME_DIR .. "src/osd/modules/render/bgfx/entryuniformreader.h",
+-		MAME_DIR .. "src/osd/modules/render/bgfx/inputpair.cpp",
+-		MAME_DIR .. "src/osd/modules/render/bgfx/inputpair.h",
+-		MAME_DIR .. "src/osd/modules/render/bgfx/frameparameter.cpp",
+-		MAME_DIR .. "src/osd/modules/render/bgfx/frameparameter.h",
+-		MAME_DIR .. "src/osd/modules/render/bgfx/timeparameter.cpp",
+-		MAME_DIR .. "src/osd/modules/render/bgfx/timeparameter.h",
+-		MAME_DIR .. "src/osd/modules/render/bgfx/paramreader.cpp",
+-		MAME_DIR .. "src/osd/modules/render/bgfx/paramreader.h",
+-		MAME_DIR .. "src/osd/modules/render/bgfx/paramuniform.cpp",
+-		MAME_DIR .. "src/osd/modules/render/bgfx/paramuniform.h",
+-		MAME_DIR .. "src/osd/modules/render/bgfx/paramuniformreader.cpp",
+-		MAME_DIR .. "src/osd/modules/render/bgfx/paramuniformreader.h",
+-		MAME_DIR .. "src/osd/modules/render/bgfx/shadermanager.cpp",
+-		MAME_DIR .. "src/osd/modules/render/bgfx/shadermanager.h",
+-		MAME_DIR .. "src/osd/modules/render/bgfx/slider.cpp",
+-		MAME_DIR .. "src/osd/modules/render/bgfx/slider.h",
+-		MAME_DIR .. "src/osd/modules/render/bgfx/sliderreader.cpp",
+-		MAME_DIR .. "src/osd/modules/render/bgfx/sliderreader.h",
+-		MAME_DIR .. "src/osd/modules/render/bgfx/slideruniform.cpp",
+-		MAME_DIR .. "src/osd/modules/render/bgfx/slideruniform.h",
+-		MAME_DIR .. "src/osd/modules/render/bgfx/slideruniformreader.cpp",
+-		MAME_DIR .. "src/osd/modules/render/bgfx/slideruniformreader.h",
+-		MAME_DIR .. "src/osd/modules/render/bgfx/statereader.cpp",
+-		MAME_DIR .. "src/osd/modules/render/bgfx/statereader.h",
+-		MAME_DIR .. "src/osd/modules/render/bgfx/suppressor.cpp",
+-		MAME_DIR .. "src/osd/modules/render/bgfx/suppressor.h",
+-		MAME_DIR .. "src/osd/modules/render/bgfx/suppressorreader.cpp",
+-		MAME_DIR .. "src/osd/modules/render/bgfx/suppressorreader.h",
+-		MAME_DIR .. "src/osd/modules/render/bgfx/target.cpp",
+-		MAME_DIR .. "src/osd/modules/render/bgfx/target.h",
+-		MAME_DIR .. "src/osd/modules/render/bgfx/targetreader.cpp",
+-		MAME_DIR .. "src/osd/modules/render/bgfx/targetreader.h",
+-		MAME_DIR .. "src/osd/modules/render/bgfx/targetmanager.cpp",
+-		MAME_DIR .. "src/osd/modules/render/bgfx/targetmanager.h",
+-		MAME_DIR .. "src/osd/modules/render/bgfx/texture.cpp",
+-		MAME_DIR .. "src/osd/modules/render/bgfx/texture.h",
+-		MAME_DIR .. "src/osd/modules/render/bgfx/texturehandleprovider.h",
+-		MAME_DIR .. "src/osd/modules/render/bgfx/texturemanager.cpp",
+-		MAME_DIR .. "src/osd/modules/render/bgfx/texturemanager.h",
+-		MAME_DIR .. "src/osd/modules/render/bgfx/uniform.cpp",
+-		MAME_DIR .. "src/osd/modules/render/bgfx/uniform.h",
+-		MAME_DIR .. "src/osd/modules/render/bgfx/uniformreader.cpp",
+-		MAME_DIR .. "src/osd/modules/render/bgfx/uniformreader.h",
+-		MAME_DIR .. "src/osd/modules/render/bgfx/valueuniform.cpp",
+-		MAME_DIR .. "src/osd/modules/render/bgfx/valueuniform.h",
+-		MAME_DIR .. "src/osd/modules/render/bgfx/valueuniformreader.cpp",
+-		MAME_DIR .. "src/osd/modules/render/bgfx/valueuniformreader.h",
+-		MAME_DIR .. "src/osd/modules/render/bgfx/view.cpp",
+-		MAME_DIR .. "src/osd/modules/render/bgfx/view.h",
+-		MAME_DIR .. "src/osd/modules/render/bgfx/writereader.cpp",
+-		MAME_DIR .. "src/osd/modules/render/bgfx/writereader.h",
+-	}
++	if _OPTIONS["NO_USE_BGFX"]=="1" then
++		defines {
++			"NO_USE_BGFX",
++		}
++	else
++		files {
++			MAME_DIR .. "src/osd/modules/render/drawbgfx.cpp",
++			MAME_DIR .. "src/osd/modules/render/aviwrite.cpp",
++			MAME_DIR .. "src/osd/modules/render/aviwrite.h",
++			MAME_DIR .. "src/osd/modules/render/bgfxutil.cpp",
++			MAME_DIR .. "src/osd/modules/render/bgfxutil.h",
++			MAME_DIR .. "src/osd/modules/render/binpacker.cpp",
++			MAME_DIR .. "src/osd/modules/render/bgfx/blendreader.cpp",
++			MAME_DIR .. "src/osd/modules/render/bgfx/blendreader.h",
++			MAME_DIR .. "src/osd/modules/render/bgfx/chain.cpp",
++			MAME_DIR .. "src/osd/modules/render/bgfx/chain.h",
++			MAME_DIR .. "src/osd/modules/render/bgfx/chainentry.cpp",
++			MAME_DIR .. "src/osd/modules/render/bgfx/chainentry.h",
++			MAME_DIR .. "src/osd/modules/render/bgfx/chainentryreader.cpp",
++			MAME_DIR .. "src/osd/modules/render/bgfx/chainentryreader.h",
++			MAME_DIR .. "src/osd/modules/render/bgfx/chainmanager.cpp",
++			MAME_DIR .. "src/osd/modules/render/bgfx/chainmanager.h",
++			MAME_DIR .. "src/osd/modules/render/bgfx/chainreader.cpp",
++			MAME_DIR .. "src/osd/modules/render/bgfx/chainreader.h",
++			MAME_DIR .. "src/osd/modules/render/bgfx/clear.cpp",
++			MAME_DIR .. "src/osd/modules/render/bgfx/clear.h",
++			MAME_DIR .. "src/osd/modules/render/bgfx/clearreader.cpp",
++			MAME_DIR .. "src/osd/modules/render/bgfx/clearreader.h",
++			MAME_DIR .. "src/osd/modules/render/bgfx/cullreader.cpp",
++			MAME_DIR .. "src/osd/modules/render/bgfx/cullreader.h",
++			MAME_DIR .. "src/osd/modules/render/bgfx/depthreader.cpp",
++			MAME_DIR .. "src/osd/modules/render/bgfx/depthreader.h",
++			MAME_DIR .. "src/osd/modules/render/bgfx/effect.cpp",
++			MAME_DIR .. "src/osd/modules/render/bgfx/effect.h",
++			MAME_DIR .. "src/osd/modules/render/bgfx/effectmanager.cpp",
++			MAME_DIR .. "src/osd/modules/render/bgfx/effectmanager.h",
++			MAME_DIR .. "src/osd/modules/render/bgfx/effectreader.cpp",
++			MAME_DIR .. "src/osd/modules/render/bgfx/effectreader.h",
++			MAME_DIR .. "src/osd/modules/render/bgfx/entryuniformreader.cpp",
++			MAME_DIR .. "src/osd/modules/render/bgfx/entryuniformreader.h",
++			MAME_DIR .. "src/osd/modules/render/bgfx/inputpair.cpp",
++			MAME_DIR .. "src/osd/modules/render/bgfx/inputpair.h",
++			MAME_DIR .. "src/osd/modules/render/bgfx/frameparameter.cpp",
++			MAME_DIR .. "src/osd/modules/render/bgfx/frameparameter.h",
++			MAME_DIR .. "src/osd/modules/render/bgfx/timeparameter.cpp",
++			MAME_DIR .. "src/osd/modules/render/bgfx/timeparameter.h",
++			MAME_DIR .. "src/osd/modules/render/bgfx/paramreader.cpp",
++			MAME_DIR .. "src/osd/modules/render/bgfx/paramreader.h",
++			MAME_DIR .. "src/osd/modules/render/bgfx/paramuniform.cpp",
++			MAME_DIR .. "src/osd/modules/render/bgfx/paramuniform.h",
++			MAME_DIR .. "src/osd/modules/render/bgfx/paramuniformreader.cpp",
++			MAME_DIR .. "src/osd/modules/render/bgfx/paramuniformreader.h",
++			MAME_DIR .. "src/osd/modules/render/bgfx/shadermanager.cpp",
++			MAME_DIR .. "src/osd/modules/render/bgfx/shadermanager.h",
++			MAME_DIR .. "src/osd/modules/render/bgfx/slider.cpp",
++			MAME_DIR .. "src/osd/modules/render/bgfx/slider.h",
++			MAME_DIR .. "src/osd/modules/render/bgfx/sliderreader.cpp",
++			MAME_DIR .. "src/osd/modules/render/bgfx/sliderreader.h",
++			MAME_DIR .. "src/osd/modules/render/bgfx/slideruniform.cpp",
++			MAME_DIR .. "src/osd/modules/render/bgfx/slideruniform.h",
++			MAME_DIR .. "src/osd/modules/render/bgfx/slideruniformreader.cpp",
++			MAME_DIR .. "src/osd/modules/render/bgfx/slideruniformreader.h",
++			MAME_DIR .. "src/osd/modules/render/bgfx/statereader.cpp",
++			MAME_DIR .. "src/osd/modules/render/bgfx/statereader.h",
++			MAME_DIR .. "src/osd/modules/render/bgfx/suppressor.cpp",
++			MAME_DIR .. "src/osd/modules/render/bgfx/suppressor.h",
++			MAME_DIR .. "src/osd/modules/render/bgfx/suppressorreader.cpp",
++			MAME_DIR .. "src/osd/modules/render/bgfx/suppressorreader.h",
++			MAME_DIR .. "src/osd/modules/render/bgfx/target.cpp",
++			MAME_DIR .. "src/osd/modules/render/bgfx/target.h",
++			MAME_DIR .. "src/osd/modules/render/bgfx/targetreader.cpp",
++			MAME_DIR .. "src/osd/modules/render/bgfx/targetreader.h",
++			MAME_DIR .. "src/osd/modules/render/bgfx/targetmanager.cpp",
++			MAME_DIR .. "src/osd/modules/render/bgfx/targetmanager.h",
++			MAME_DIR .. "src/osd/modules/render/bgfx/texture.cpp",
++			MAME_DIR .. "src/osd/modules/render/bgfx/texture.h",
++			MAME_DIR .. "src/osd/modules/render/bgfx/texturehandleprovider.h",
++			MAME_DIR .. "src/osd/modules/render/bgfx/texturemanager.cpp",
++			MAME_DIR .. "src/osd/modules/render/bgfx/texturemanager.h",
++			MAME_DIR .. "src/osd/modules/render/bgfx/uniform.cpp",
++			MAME_DIR .. "src/osd/modules/render/bgfx/uniform.h",
++			MAME_DIR .. "src/osd/modules/render/bgfx/uniformreader.cpp",
++			MAME_DIR .. "src/osd/modules/render/bgfx/uniformreader.h",
++			MAME_DIR .. "src/osd/modules/render/bgfx/valueuniform.cpp",
++			MAME_DIR .. "src/osd/modules/render/bgfx/valueuniform.h",
++			MAME_DIR .. "src/osd/modules/render/bgfx/valueuniformreader.cpp",
++			MAME_DIR .. "src/osd/modules/render/bgfx/valueuniformreader.h",
++			MAME_DIR .. "src/osd/modules/render/bgfx/view.cpp",
++			MAME_DIR .. "src/osd/modules/render/bgfx/view.h",
++			MAME_DIR .. "src/osd/modules/render/bgfx/writereader.cpp",
++			MAME_DIR .. "src/osd/modules/render/bgfx/writereader.h",
++		}
++	end
+ 	includedirs {
+ 		MAME_DIR .. "3rdparty/bgfx/examples/common",
+ 		MAME_DIR .. "3rdparty/bgfx/include",
+@@ -645,6 +651,23 @@ if not _OPTIONS["USE_DISPATCH_GL"] then
+ 	_OPTIONS["USE_DISPATCH_GL"] = "0"
+ end
+ 
++newoption {
++	trigger = "NO_USE_BGFX",
++	description = "Disable BGFX renderer (and bx/bimg/bgfx libraries)",
++	allowed = {
++		{ "0",  "Enable BGFX"  },
++		{ "1",  "Disable BGFX" },
++	},
++}
++
++if not _OPTIONS["NO_USE_BGFX"] then
++	if _OPTIONS["targetos"]=="wii" then
++		_OPTIONS["NO_USE_BGFX"] = "1"
++	else
++		_OPTIONS["NO_USE_BGFX"] = "0"
++	end
++end
++
+ newoption {
+ 	trigger = "NO_USE_MIDI",
+ 	description = "Disable MIDI I/O",
+diff --git a/scripts/toolchain.lua b/scripts/toolchain.lua
+index 14a374c3..fd448bad 100644
+--- a/scripts/toolchain.lua
++++ b/scripts/toolchain.lua
+@@ -20,6 +20,7 @@ newoption {
+ 		{ "android-x86",   "Android - x86"          },
+ 		{ "android-x64",   "Android - x64"          },
+ 		{ "asmjs",         "Emscripten/asm.js"      },
++		{ "wii",           "Nintendo Wii (devkitPPC)" },
+ 		{ "freebsd",       "FreeBSD"                },
+ 		{ "freebsd-clang", "FreeBSD (clang compiler)"},
+ 		{ "linux-gcc",     "Linux (GCC compiler)"   },
+@@ -114,6 +115,16 @@ function toolchain(_buildDir, _subDir)
+ 			location (_buildDir .. "projects/" .. _subDir .. "/".. _ACTION .. "-asmjs")
+ 		end
+ 
++		if "wii" == _OPTIONS["gcc"] then
++			if not os.getenv("DEVKITPPC") then
++				print("Set DEVKITPPC environment variable.")
++			end
++			premake.gcc.cc   = "$(DEVKITPPC)/bin/powerpc-eabi-gcc"
++			premake.gcc.cxx  = "$(DEVKITPPC)/bin/powerpc-eabi-g++"
++			premake.gcc.ar   = "$(DEVKITPPC)/bin/powerpc-eabi-ar"
++			location (_buildDir .. "projects/" .. _subDir .. "/".. _ACTION .. "-wii")
++		end
++
+ 		if "freebsd" == _OPTIONS["gcc"] then
+ 			location (_buildDir .. "projects/" .. _subDir .. "/".. _ACTION .. "-freebsd")
+ 		end
+@@ -529,6 +540,45 @@ function toolchain(_buildDir, _subDir)
+ 			"-Wno-extern-c-compat",
+ 		}
+ 
++	configuration { "wii" }
++		targetdir (_buildDir .. "wii" .. "/bin")
++		objdir (_buildDir .. "wii" .. "/obj")
++		defines {
++			"GEKKO",
++			"HW_RVL",
++		}
++		buildoptions {
++			"-mrvl",
++			"-mcpu=750",
++			"-meabi",
++			"-mhard-float",
++			"-ffunction-sections",
++			"-fdata-sections",
++			"-isystem $(DEVKITPRO)/libogc/include",
++			"-isystem $(DEVKITPRO)/portlibs/ppc/include",
++			"-Wno-cast-align",
++		}
++		buildoptions_cpp {
++			-- devkitPPC's <limits.h> only defines the long long limits for C;
++			-- supply them for C++ (compatible with <climits> and the PCH)
++			"-DLLONG_MAX=__LONG_LONG_MAX__",
++			"'-DLLONG_MIN=(-__LONG_LONG_MAX__-1LL)'",
++			"'-DULLONG_MAX=(__LONG_LONG_MAX__*2ULL+1ULL)'",
++		}
++		linkoptions {
++			"-mrvl",
++			"-mcpu=750",
++			"-meabi",
++			"-mhard-float",
++			"-Wl,--gc-sections",
++			"-Wl,-Map,$(TARGET).map",
++			-- MAME is far larger than MEM1 (24 MB): code goes to MEM2,
++			-- writable data stays in MEM1 (see the linker script)
++			"-T " .. MAME_DIR .. "src/osd/wii/mame4wii.ld",
++			"-L$(DEVKITPRO)/libogc/lib/wii",
++			"-L$(DEVKITPRO)/portlibs/ppc/lib",
++		}
++
+ 	configuration { "osx*", "x32", "not arm64" }
+ 		objdir (_buildDir .. "osx_clang" .. "/obj")
+ 		buildoptions {
+@@ -570,6 +620,13 @@ function toolchain(_buildDir, _subDir)
+ end
+ 
+ function strip()
++	configuration { "wii" }
++		postbuildcommands {
++			"$(SILENT) echo Creating Wii DOL.",
++			"$(SILENT) $(DEVKITPRO)/tools/bin/elf2dol \"$(TARGET)\" \"$(basename $(TARGET)).dol\"",
++		}
++	configuration {} -- reset configuration
++
+ 	if _OPTIONS["PDB_SYMBOLS"]~=nil and _OPTIONS["PDB_SYMBOLS"]~=0 then
+ 		linkoptions {
+ 			"-Wl,--pdb=$(subst .exe,.pdb,$(TARGET))",
+@@ -592,6 +649,12 @@ function strip()
+ 			"$(SILENT) " .. toolchainPrefix .. "strip -s \"$(TARGET)\""
+ 		}
+ 
++	configuration { "wii" }
++		postbuildcommands {
++			"$(SILENT) echo Stripping symbols.",
++			"$(SILENT) $(DEVKITPPC)/bin/powerpc-eabi-strip -s \"$(TARGET)\"",
++		}
++
+ 	configuration { "linux-*" }
+ 		postbuildcommands {
+ 			"$(SILENT) echo Stripping symbols.",
+diff --git a/src/emu/http.cpp b/src/emu/http.cpp
+index 9194e964..932f6ed8 100644
+--- a/src/emu/http.cpp
++++ b/src/emu/http.cpp
+@@ -11,6 +11,36 @@
+ #include "emu.h"
+ #include "http.h"
+ 
++#if defined(HW_RVL)
++
++// No TCP/IP stack is available to MAME on the Nintendo Wii, so the embedded
++// web server is compiled out; the API remains available as a no-op.
++
++namespace asio { class io_context { }; }
++namespace webpp { class http_server { }; class ws_server { }; struct Connection { }; }
++
++http_manager::http_manager(bool active, short port, const char *root) : m_active(false) { }
++http_manager::~http_manager() { }
++void http_manager::clear() { }
++void http_manager::add_template(const std::string &path, substitution substitute, char init, char term) { }
++void http_manager::remove_template(const std::string &path) { }
++void http_manager::serve_template(http_request_ptr request, http_response_ptr response, const std::string &path, substitution substitute, char init, char term) { }
++void http_manager::serve_document(http_request_ptr request, http_response_ptr response, const std::string &path) { }
++void http_manager::add_http_handler(const std::string &path, http_handler handler) { }
++void http_manager::remove_http_handler(const std::string &path) { }
++http_manager::websocket_endpoint_ptr http_manager::add_endpoint(const std::string &path, websocket_open_handler on_open, websocket_message_handler on_message, websocket_close_handler on_close, websocket_error_handler on_error)
++{
++	auto endpoint = std::make_shared<websocket_endpoint>();
++	endpoint->on_open = on_open;
++	endpoint->on_message = on_message;
++	endpoint->on_close = on_close;
++	endpoint->on_error = on_error;
++	return endpoint;
++}
++void http_manager::remove_endpoint(const std::string &path) { }
++
++#else // defined(HW_RVL)
++
+ #include "server_http.hpp"
+ #include "server_ws.hpp"
+ 
+@@ -575,3 +605,5 @@ void http_manager::remove_endpoint(const std::string &path) {
+ 
+ 	m_endpoints.erase(path);
+ }
++
++#endif // defined(HW_RVL)
+diff --git a/src/frontend/mame/mame.cpp b/src/frontend/mame/mame.cpp
+index 4c4ea965..5cb6d9ea 100644
+--- a/src/frontend/mame/mame.cpp
++++ b/src/frontend/mame/mame.cpp
+@@ -269,7 +269,14 @@ int mame_machine_manager::execute()
+ 
+ 		// otherwise, perform validity checks before anything else
+ 		bool is_empty = (system == &GAME_NAME(___empty));
++#if defined(GEKKO)
++		// The Wii does not have the memory to instantiate every system in
++		// the source file (netlist-based ones in particular); -validate
++		// still works when asked for explicitly.
++		if (false)
++#else
+ 		if (!is_empty)
++#endif
+ 		{
+ 			validity_checker valid(m_options, true);
+ 			valid.set_verbose(false);
+diff --git a/src/lib/netlist/plib/pdynlib.cpp b/src/lib/netlist/plib/pdynlib.cpp
+index cdc25dc7..fc26ea59 100644
+--- a/src/lib/netlist/plib/pdynlib.cpp
++++ b/src/lib/netlist/plib/pdynlib.cpp
+@@ -5,7 +5,7 @@
+ 
+ #ifdef _WIN32
+ #include "windows.h"
+-#else
++#elif !defined(GEKKO)
+ #include <dlfcn.h>
+ #endif
+ 
+@@ -25,7 +25,7 @@ dynamic_library::dynamic_library(const pstring &libname)
+ 		m_lib = LoadLibrary(winapi_string(putf8string(libname)).c_str());
+ 	else
+ 		m_lib = GetModuleHandle(nullptr);
+-#elif defined(__EMSCRIPTEN__)
++#elif defined(__EMSCRIPTEN__) || defined(GEKKO)
+ 	//no-op
+ #else
+ 	//printf("loading <%s>\n", libname.c_str());
+@@ -50,7 +50,7 @@ dynamic_library::dynamic_library([[maybe_unused]] const pstring &path, const pst
+ 		m_lib = LoadLibrary(winapi_string(putf8string(libname)).c_str());
+ 	else
+ 		m_lib = GetModuleHandle(nullptr);
+-#elif defined(__EMSCRIPTEN__)
++#elif defined(__EMSCRIPTEN__) || defined(GEKKO)
+ 	//no-op
+ #else
+ 	//printf("loading <%s>\n", libname.c_str());
+@@ -71,8 +71,7 @@ dynamic_library::~dynamic_library()
+ {
+ 	if (m_lib != nullptr)
+ 	{
+-#ifdef _WIN32
+-#else
++#if !defined(_WIN32) && !defined(GEKKO)
+ 		dlclose(m_lib);
+ 		//printf("Closed %s\n", dlerror());
+ #endif
+@@ -83,6 +82,8 @@ void *dynamic_library::get_symbol_pointer(const pstring &name) const noexcept
+ {
+ #ifdef _WIN32
+ 	return (void *) GetProcAddress((HMODULE) m_lib, putf8string(name).c_str());
++#elif defined(GEKKO)
++	return nullptr;
+ #else
+ 	return dlsym(m_lib, putf8string(name).c_str());
+ #endif
+diff --git a/src/lib/netlist/plib/pmempool.h b/src/lib/netlist/plib/pmempool.h
+index 29712601..1a4b17fd 100644
+--- a/src/lib/netlist/plib/pmempool.h
++++ b/src/lib/netlist/plib/pmempool.h
+@@ -39,7 +39,12 @@ namespace plib {
+ 		using base_allocator_type = typename BASEARENA::template allocator_type<T>;
+ 		using block_align = std::integral_constant<size_t, 1024>;
+ 
++#if defined(GEKKO)
++		// every matrix solver has its own pool: keep blocks small on the Wii
++		mempool_arena(size_t min_alloc = (1<<16));
++#else
+ 		mempool_arena(size_t min_alloc = (1<<21));
++#endif
+ 
+ 		PCOPYASSIGNMOVE(mempool_arena, delete)
+ 
+diff --git a/src/mame/capcom/cps2comm.cpp b/src/mame/capcom/cps2comm.cpp
+index e63d4e00..ad4d6970 100644
+--- a/src/mame/capcom/cps2comm.cpp
++++ b/src/mame/capcom/cps2comm.cpp
+@@ -81,7 +81,9 @@
+ 
+ #include "emuopts.h"
+ 
++#if !defined(GEKKO)
+ #include "asio.h"
++#endif
+ 
+ #include <atomic>
+ #include <algorithm>
+@@ -114,6 +116,21 @@ INPUT_PORTS_END
+ 
+ 
+ 
++#if defined(GEKKO)
++
++// no TCP/IP networking on the Wii: the link is never started
++class cps2_comm_device::context
++{
++public:
++	void stop() { }
++	void set_routing(u8 val) { }
++	bool usart_get(u8 &data) { return false; }
++	void send_in(u8 data) { }
++	void send_out(u8 data) { }
++};
++
++#else // defined(GEKKO)
++
+ class cps2_comm_device::context
+ {
+ public:
+@@ -562,6 +579,8 @@ private:
+ 	std::array<u8, 128> m_usart_buf;
+ };
+ 
++#endif // defined(GEKKO)
++
+ 
+ 
+ DEFINE_DEVICE_TYPE(CAPCOM_CPS2_COMM, cps2_comm_device, "cps2comm", "Capcom CPS-2 communication board")
+@@ -789,6 +808,10 @@ void cps2_comm_device::start_comm()
+ 	if (!BIT(m_config->read(), 0))
+ 		return;
+ 
++#if defined(GEKKO)
++	osd_printf_error("[%s] communication is not supported on this platform.\n", tag());
++#else
++
+ 	auto const &opts = mconfig().options();
+ 	std::error_code err;
+ 	std::istringstream parsestr;
+@@ -859,4 +882,5 @@ void cps2_comm_device::start_comm()
+ 	}
+ 
+ 	m_context = std::move(ctx);
++#endif // defined(GEKKO)
+ }
+diff --git a/src/osd/modules/debugger/debugimgui.cpp b/src/osd/modules/debugger/debugimgui.cpp
+index 4a051f04..83c94d89 100644
+--- a/src/osd/modules/debugger/debugimgui.cpp
++++ b/src/osd/modules/debugger/debugimgui.cpp
+@@ -4,6 +4,9 @@
+ 
+ #include "emu.h"
+ #include "debug_module.h"
++#include "modules/osdmodule.h"
++
++#if !defined(NO_USE_BGFX)
+ 
+ #include "imgui/imgui.h"
+ 
+@@ -1646,4 +1649,10 @@ void debug_imgui::debugger_update()
+ 
+ } // namespace osd
+ 
++#else // !defined(NO_USE_BGFX)
++
++namespace osd { namespace { MODULE_NOT_SUPPORTED(debug_imgui, OSD_DEBUG_PROVIDER, "imgui") } }
++
++#endif // !defined(NO_USE_BGFX)
++
+ MODULE_DEFINITION(DEBUG_IMGUI, osd::debug_imgui)
+diff --git a/src/osd/modules/file/stdfile.cpp b/src/osd/modules/file/stdfile.cpp
+index 4b484fa6..8efd7718 100644
+--- a/src/osd/modules/file/stdfile.cpp
++++ b/src/osd/modules/file/stdfile.cpp
+@@ -20,6 +20,9 @@
+ 
+ #include <stdio.h>  // for fileno
+ #include <unistd.h> // for ftruncate
++#include <sys/stat.h>
++
++#include <chrono>
+ 
+ 
+ namespace {
+@@ -145,7 +148,18 @@ std::error_condition osd_file::open(std::string const &path, std::uint32_t openf
+ 		return std::errc::invalid_argument;
+ 
+ 	// open the file
+-	FILE *const fileptr = std::fopen(path.c_str(), mode);
++	FILE *fileptr = std::fopen(path.c_str(), mode);
++	if (!fileptr && (errno == ENOENT) && (openflags & OPEN_FLAG_CREATE) && (openflags & OPEN_FLAG_CREATE_PATHS))
++	{
++		// create any missing parent directories and try again
++		for (std::string::size_type pos = path.find('/', 1); pos != std::string::npos; pos = path.find('/', pos + 1))
++		{
++			std::string const dir(path, 0, pos);
++			if (!dir.empty() && dir.back() != ':')
++				::mkdir(dir.c_str(), 0777);
++		}
++		fileptr = std::fopen(path.c_str(), mode);
++	}
+ 	if (!fileptr)
+ 		return std::error_condition(errno, std::generic_category());
+ 
+@@ -207,18 +221,6 @@ bool osd_get_physical_drive_geometry(const char *filename, uint32_t *cylinders,
+ }
+ 
+ 
+-//============================================================
+-//  osd_uchar_from_osdchar
+-//============================================================
+-
+-int osd_uchar_from_osdchar(char32_t *uchar, const char *osdchar, size_t count) noexcept
+-{
+-	// we assume a standard 1:1 mapping of characters to the first 256 unicode characters
+-	*uchar = (uint8_t)*osdchar;
+-	return 1;
+-}
+-
+-
+ //============================================================
+ //  osd_stat
+ //============================================================
+@@ -238,16 +240,24 @@ osd::directory::entry::ptr osd_stat(const std::string &path)
+ 	auto const resultname = reinterpret_cast<char *>(result) + sizeof(*result);
+ 	std::strcpy(resultname, path.c_str());
+ 	result->name = resultname;
+-	result->type = ENTTYPE_NONE;
++	result->type = osd::directory::entry::entry_type::NONE;
+ 	result->size = 0;
+ 
+-	FILE *const f = std::fopen(path.c_str(), "rb");
+-	if (f)
++	struct stat st;
++	if (::stat(path.c_str(), &st) == 0)
+ 	{
+-		std::fseek(f, 0, SEEK_END);
+-		result->type = ENTTYPE_FILE;
+-		result->size = std::ftell(f);
+-		std::fclose(f);
++		if (S_ISDIR(st.st_mode))
++			result->type = osd::directory::entry::entry_type::DIR;
++		else if (S_ISREG(st.st_mode))
++			result->type = osd::directory::entry::entry_type::FILE;
++		else
++			result->type = osd::directory::entry::entry_type::OTHER;
++		result->size = std::uint64_t(st.st_size);
++		result->last_modified = std::chrono::system_clock::from_time_t(st.st_mtime);
++	}
++	else
++	{
++		return nullptr;
+ 	}
+ 
+ 	return osd::directory::entry::ptr(result);
+@@ -260,11 +270,27 @@ osd::directory::entry::ptr osd_stat(const std::string &path)
+ 
+ std::error_condition osd_get_full_path(std::string &dst, std::string const &path) noexcept
+ {
+-	// derive the full path of the file in an allocated string
+-	// for now just fake it since we don't presume any underlying file system
+-	try { dst = path; }
+-	catch (...) { return std::errc::not_enough_memory; }
+-
++	try
++	{
++		if (osd_is_absolute_path(path))
++		{
++			dst = path;
++		}
++		else
++		{
++			char cwd[1024];
++			if (!getcwd(cwd, sizeof(cwd)))
++				return std::error_condition(errno, std::generic_category());
++			dst = cwd;
++			if (!dst.empty() && dst.back() != '/')
++				dst.push_back('/');
++			dst.append(path);
++		}
++	}
++	catch (...)
++	{
++		return std::errc::not_enough_memory;
++	}
+ 	return std::error_condition();
+ }
+ 
+@@ -275,8 +301,23 @@ std::error_condition osd_get_full_path(std::string &dst, std::string const &path
+ 
+ bool osd_is_absolute_path(std::string const &path) noexcept
+ {
+-	// assume no for everything
+-	return false;
++	// "/foo" or a devoptab prefix such as "sd:/foo"
++	if (!path.empty() && path[0] == '/')
++		return true;
++	auto const colon = path.find(':');
++	auto const slash = path.find('/');
++	return (colon != std::string::npos) && ((slash == std::string::npos) || (colon < slash));
++}
++
++
++//============================================================
++//  osd_is_valid_filename_char
++//============================================================
++
++bool osd_is_valid_filename_char(char32_t uchar) noexcept
++{
++	// the FAT driver is the limiting factor
++	return uchar >= 0x20 && uchar != '<' && uchar != '>' && uchar != '\"' && uchar != ':' && uchar != '|' && uchar != '?' && uchar != '*';
+ }
+ 
+ 
+diff --git a/src/osd/modules/lib/osdobj_common.cpp b/src/osd/modules/lib/osdobj_common.cpp
+index 9695f01e..3117f5d3 100644
+--- a/src/osd/modules/lib/osdobj_common.cpp
++++ b/src/osd/modules/lib/osdobj_common.cpp
+@@ -234,7 +234,7 @@ void osd_common_t::register_options()
+ #endif
+ 	REGISTER_MODULE(m_mod_man, RENDERER_GDI); // GDI ahead of OpenGL as there's a chance Windows has no OpenGL
+ 	REGISTER_MODULE(m_mod_man, RENDERER_OPENGL);
+-#if !defined(OSD_WINDOWS) && !defined(SDLMAME_WIN32)
++#if !defined(OSD_WINDOWS) && !defined(SDLMAME_WIN32) && !defined(NO_USE_BGFX)
+ 	REGISTER_MODULE(m_mod_man, RENDERER_BGFX); // try BGFX after OpenGL on other operating systems for now
+ #endif
+ #ifdef SDLMAME_SDL3
+@@ -267,6 +267,9 @@ void osd_common_t::register_options()
+ #endif
+ #ifndef NO_USE_PIPEWIRE
+ 	REGISTER_MODULE(m_mod_man, SOUND_PIPEWIRE);
++#endif
++#if defined(OSD_WII)
++	REGISTER_MODULE(m_mod_man, SOUND_WII);
+ #endif
+ 	REGISTER_MODULE(m_mod_man, SOUND_NONE);
+ 
+@@ -274,6 +277,9 @@ void osd_common_t::register_options()
+ 	REGISTER_MODULE(m_mod_man, MONITOR_WIN32);
+ 	REGISTER_MODULE(m_mod_man, MONITOR_DXGI);
+ 	REGISTER_MODULE(m_mod_man, MONITOR_MAC);
++#if defined(OSD_WII)
++	REGISTER_MODULE(m_mod_man, MONITOR_WII);
++#endif
+ 
+ #ifdef SDLMAME_MACOSX
+ 	REGISTER_MODULE(m_mod_man, DEBUG_OSX);
+@@ -301,6 +307,9 @@ void osd_common_t::register_options()
+ 	REGISTER_MODULE(m_mod_man, KEYBOARDINPUT_RAWINPUT);
+ 	REGISTER_MODULE(m_mod_man, KEYBOARDINPUT_DINPUT);
+ 	REGISTER_MODULE(m_mod_man, KEYBOARDINPUT_WIN32);
++#if defined(OSD_WII)
++	REGISTER_MODULE(m_mod_man, KEYBOARDINPUT_WII);
++#endif
+ 	REGISTER_MODULE(m_mod_man, KEYBOARD_NONE);
+ 
+ #if defined(OSD_SDL)
+@@ -309,6 +318,9 @@ void osd_common_t::register_options()
+ 	REGISTER_MODULE(m_mod_man, MOUSEINPUT_RAWINPUT);
+ 	REGISTER_MODULE(m_mod_man, MOUSEINPUT_DINPUT);
+ 	REGISTER_MODULE(m_mod_man, MOUSEINPUT_WIN32);
++#if defined(OSD_WII)
++	REGISTER_MODULE(m_mod_man, MOUSEINPUT_WII);
++#endif
+ 	REGISTER_MODULE(m_mod_man, MOUSE_NONE);
+ 
+ #if defined(OSD_SDL)
+@@ -317,6 +329,9 @@ void osd_common_t::register_options()
+ 	REGISTER_MODULE(m_mod_man, LIGHTGUN_X11);
+ 	REGISTER_MODULE(m_mod_man, LIGHTGUNINPUT_RAWINPUT);
+ 	REGISTER_MODULE(m_mod_man, LIGHTGUNINPUT_WIN32);
++#if defined(OSD_WII)
++	REGISTER_MODULE(m_mod_man, LIGHTGUNINPUT_WII);
++#endif
+ 	REGISTER_MODULE(m_mod_man, LIGHTGUN_NONE);
+ 
+ #if defined(OSD_SDL)
+@@ -328,6 +343,9 @@ void osd_common_t::register_options()
+ 	REGISTER_MODULE(m_mod_man, JOYSTICKINPUT_XINPUT);
+ #if !defined(OSD_SDL) && defined(USE_SDL_JOYSTICK)
+ 	REGISTER_MODULE(m_mod_man, JOYSTICKINPUT_SDLJOY);
++#endif
++#if defined(OSD_WII)
++	REGISTER_MODULE(m_mod_man, JOYSTICKINPUT_WII);
+ #endif
+ 	REGISTER_MODULE(m_mod_man, JOYSTICK_NONE);
+ 
+diff --git a/src/osd/modules/output/network.cpp b/src/osd/modules/output/network.cpp
+index 62bf15ad..a1aeae67 100644
+--- a/src/osd/modules/output/network.cpp
++++ b/src/osd/modules/output/network.cpp
+@@ -13,6 +13,8 @@
+ #include "modules/lib/osdobj_common.h"
+ #include "modules/osdmodule.h"
+ 
++#if !defined(OSD_WII)
++
+ #include "emu.h"
+ 
+ #include "asio.h"
+@@ -690,4 +692,10 @@ private:
+ 
+ } // namespace osd
+ 
++#else // !defined(OSD_WII)
++
++namespace osd { namespace { MODULE_NOT_SUPPORTED(output_network, OSD_OUTPUT_PROVIDER, "network") } }
++
++#endif // !defined(OSD_WII)
++
+ MODULE_DEFINITION(OUTPUT_NETWORK, osd::output_network)
+diff --git a/src/osd/modules/render/drawnone.cpp b/src/osd/modules/render/drawnone.cpp
+index 55ce1bbe..db4a6e14 100644
+--- a/src/osd/modules/render/drawnone.cpp
++++ b/src/osd/modules/render/drawnone.cpp
+@@ -62,8 +62,10 @@ protected:
+ 
+ int video_none::init(osd_interface &osd, osd_options const &options)
+ {
++#if !defined(OSD_WII) // the Wii OSD draws the render target itself
+ 	if (!emulator_info::standalone() && (options.seconds_to_run() == 0))
+ 		osd_printf_warning("Warning: -video none doesn't make much sense without -seconds_to_run\n");
++#endif
+ 
+ 	return 0;
+ }
