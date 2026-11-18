@@ -71,6 +71,18 @@ SECTIONS {
 		*(.sbss2 .sbss2.* .gnu.linkonce.sb2.*)
 	} :rodata = 0
 
+	/* Thread-local variables.  libogc gives every thread the same r2
+	   (_SDA2_BASE_ = .sdata2 + 0x8000) and no TLS block of its own, so
+	   local-exec TLS accesses (r2 - 0x7000 + offset) all end up at
+	   .sdata2 + 0x1000.  Reserve that range as a zeroed, writable area
+	   shared by all threads; otherwise those writes land in whatever
+	   section follows (the unwinder's tables). */
+	.tls_area ADDR(.sdata2) + 0x1000 : {
+		__tls_area_start = .;
+		BYTE(0)
+		. = __tls_area_start + 0x400;
+	} :rodata = 0
+
 	.eh_frame_hdr : ALIGN_WITH_INPUT {
 		*(.eh_frame_hdr)
 		*(.eh_frame_entry .eh_frame_entry.*)
@@ -131,6 +143,10 @@ SECTIONS {
 		. = ALIGN(32);
 	} :data = 0
 
+	/* thread-local templates: only their layout is used (see .tls_area) */
+	.tdata : { *(.tdata .tdata.* .gnu.linkonce.td.*) } :data
+	.tbss  : { *(.tbss .tbss.* .gnu.linkonce.tb.*) *(.tcommon) } :data
+
 	.sbss . (NOLOAD) : {
 		*(.dynsbss)
 		*(.sbss .sbss.* .gnu.linkonce.sb.*)
@@ -157,6 +173,9 @@ SECTIONS {
 	/* keep 64 KB at the top of MEM1 for the loader's command line */
 	ASSERT( __bss_end <= MEM1_TOP - 0x10000, "MEM1 data area too large: move MEM1_DATA down" )
 	ASSERT( __mem2_image_end <= 0x93000000, "image too large for MEM2" )
+	ASSERT( SIZEOF(.sdata2) <= 0x1000, ".sdata2 overlaps the thread-local area" )
+	ASSERT( SIZEOF(.tdata) == 0, "initialised thread-local data is not supported" )
+	ASSERT( SIZEOF(.tbss) <= 0x400, "thread-local data larger than the reserved area" )
 
 	/* ====================== debugging metadata ====================== */
 

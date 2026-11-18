@@ -64,6 +64,7 @@
 void wii_video_show_console();
 GXRModeObj *wii_video_mode();
 void wii_input_hw_init();
+void wii_input_hw_shutdown();
 void wii_input_poll_hardware();
 bool wii_input_any_home_pressed();
 void wii_input_suspend(bool suspend);
@@ -588,6 +589,7 @@ int main(int argc, char *argv[])
 					[] () -> u32 { INPUT_Update(); return INPUT_ButtonsDown(); });
 			if (upd == WIIUPDATE_UPDATED)
 			{
+				wii_input_hw_shutdown();
 				wii_video_hw_shutdown();
 				return 0;
 			}
@@ -633,9 +635,16 @@ int main(int argc, char *argv[])
 		wait_for_button("Press A or HOME to exit.");
 	}
 
-	// flush everything to the card before returning to the loader
+	// stop the input threads, then flush everything to the card before
+	// returning to the loader
+	wii_input_hw_shutdown();
 	std::fflush(stdout);
 	std::fflush(stderr);
+	if (s_log_fd >= 0)
+	{
+		::close(s_log_fd);
+		s_log_fd = -1;
+	}
 	fatUnmount("sd:");
 	fatUnmount("usb:");
 

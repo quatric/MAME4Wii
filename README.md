@@ -43,10 +43,29 @@ NVRAM, save states, ...).
 | MAME4Wii (Capcom) | 1942, 1943, Commando, Ghosts'n Goblins, CPS-1, CPS-2 |
 | MAME4Wii (Neo Geo) | Neo Geo MVS/AES |
 | MAME4Wii (Sega, Konami, Irem & Technos) | Sega System 1, System 16A/16B, Double Dragon, Irem M72, TMNT, The Simpsons and related boards |
+| MAME4Wii (VTech V.Smile) | VTech V.Smile and V.Smile Motion consoles and their cartridges |
 
 The data folder is looked for in this order: `sd:/mame4wii`, `usb:/mame4wii`,
 `sd:/apps/mame4wii`, `usb:/apps/mame4wii`, then the folder the executable was
 started from.
+
+### Cartridge consoles (V.Smile)
+
+The V.Smile needs its system ROM: put `vsmile.zip` (with `vsmile_v100.bin`,
+`vsmile_v102.bin` and `vsmile_v103.bin`) in `mame4wii/roms`. A cartridge can
+then be loaded in either of two ways:
+
+- From MAME's software list: put it in `mame4wii/roms/vsmile_cart/<name>.zip`
+  (or a `<name>` folder) with MAME's short name and file names, e.g.
+  `vsmile_cart/blueclue.zip` containing `vsmile92400.bin`. Pick it under
+  *Software Selection*, or start it directly with `vsmile blueclue` in
+  `cmdline.txt`.
+- As a plain file: put the `.bin` anywhere under `mame4wii` and mount it from
+  the *File Manager* in MAME's menu, or start it with
+  `vsmile -cart carts/game.bin` in `cmdline.txt`.
+
+The V.Smile has a 27 MHz CPU and graphics chip that are demanding to emulate;
+on the Wii it currently runs well below full speed.
 
 ### Memory
 

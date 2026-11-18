@@ -479,6 +479,23 @@ index 14a374c3..fd448bad 100644
  	configuration { "linux-*" }
  		postbuildcommands {
  			"$(SILENT) echo Stripping symbols.",
+diff --git a/src/devices/bus/vsmile/vsmile_slot.cpp b/src/devices/bus/vsmile/vsmile_slot.cpp
+index 1e743c5f..1940eb7c 100644
+--- a/src/devices/bus/vsmile/vsmile_slot.cpp
++++ b/src/devices/bus/vsmile/vsmile_slot.cpp
+@@ -160,6 +160,12 @@ std::pair<std::error_condition, std::string> vsmile_cart_slot_device::call_load(
+ 			osd_printf_verbose("V.Smile: Detected (XML) %s\n", pcb_name ? pcb_name : "NONE");
+ 		}
+ 
++		// the image holds little-endian 16-bit words; the cartridge reads
++		// them as native words, so convert them on big-endian hosts
++		uint16_t *const rom16 = m_cart->get_rom_base();
++		for (uint32_t i = 0; i < size / 2; i++)
++			rom16[i] = little_endianize_int16(rom16[i]);
++
+ 		if (m_type == VSMILE_NVRAM)
+ 			m_cart->nvram_alloc(0x20'0000);
+ 
 diff --git a/src/emu/http.cpp b/src/emu/http.cpp
 index 9194e964..932f6ed8 100644
 --- a/src/emu/http.cpp

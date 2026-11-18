@@ -295,6 +295,16 @@ void wii_input_hw_init()
 	s_hw_initialized = true;
 }
 
+// stop the input library's background threads and release the devices;
+// they must not outlive the USB and Bluetooth stacks at exit
+void wii_input_hw_shutdown()
+{
+	if (!s_hw_initialized)
+		return;
+	INPUT_Shutdown();
+	s_hw_initialized = false;
+}
+
 // read every controller; called once per emulated frame
 void wii_input_poll_hardware()
 {

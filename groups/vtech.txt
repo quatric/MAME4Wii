@@ -1,0 +1,3 @@
+# description: VTech V.Smile
+# VTech V.Smile and V.Smile Motion consoles (cartridges load from the software list or with -cart)
+vtech/vsmile.cpp

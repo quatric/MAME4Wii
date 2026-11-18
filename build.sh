@@ -54,10 +54,13 @@ prepare() {
 		fi
 	done
 
-	# new files (the Wii OSD, build scripts, boot stub)
+	# new files (the Wii OSD, build scripts, boot stub); a copy inside mame/
+	# that is newer than overlay/ has local edits (see --export) and is kept
 	(cd "$ROOT/overlay" && find . -type f) | while read -r f; do
 		mkdir -p "$MAME/$(dirname "$f")"
-		cmp -s "$ROOT/overlay/$f" "$MAME/$f" || cp "$ROOT/overlay/$f" "$MAME/$f"
+		if [ ! -e "$MAME/$f" ] || [ "$ROOT/overlay/$f" -nt "$MAME/$f" ]; then
+			cmp -s "$ROOT/overlay/$f" "$MAME/$f" || cp "$ROOT/overlay/$f" "$MAME/$f"
+		fi
 	done
 
 	# helper libraries are referenced from MAME's 3rdparty folder
@@ -104,6 +107,16 @@ build_group() {
 		-e "s|@SUFFIX@| ($desc)|g" -e "s|@GROUP@|$desc|g" \
 		"$MAME/src/osd/wii/hbc/meta.xml.in" > "$app/meta.xml"
 	"$DEVKITPPC/bin/powerpc-eabi-size" "$MAME/$target" | tail -1
+
+	# software lists of the group's systems, so media can be loaded by name
+	lists=$(cd "$MAME" && grep -hoE 'set_(original|compatible)\("[^"]+"\)' $(echo "$sources" | tr , ' ') |
+		sed 's/.*("\(.*\)")/\1/' | sort -u)
+	for l in $lists; do
+		if [ -f "$MAME/hash/$l.xml" ]; then
+			mkdir -p "$DIST/mame4wii/hash"
+			cp "$MAME/hash/$l.xml" "$DIST/mame4wii/hash/"
+		fi
+	done
 }
 
 case "$1" in
