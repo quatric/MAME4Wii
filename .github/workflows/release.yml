@@ -23,7 +23,6 @@ jobs:
         run: |
           apt-get update
           apt-get install -y --no-install-recommends git make zip python3 ca-certificates
-          dkp-pacman -Syu --noconfirm wii-dev
 
       - uses: actions/checkout@v4
 
