@@ -128,6 +128,15 @@ cd MAME4Wii
 The first build compiles the whole MAME core and takes a while; further
 groups only compile their own drivers.
 
+### Tiny builds for a single driver
+
+A build with fewer drivers leaves more RAM for the emulated system, so a
+demanding game can sometimes run from a build that contains only its driver.
+Add a group file listing just that driver (e.g. `groups/mygame.txt` with a
+`# description:` line and `konami/mystwarr.cpp`) and run `./build.sh mygame`,
+or use the *Tiny build* workflow in the Actions tab: give it a name and the
+driver source files and it uploads the zip as a workflow artifact.
+
 ### How the port is organised
 
 - `mame/`: upstream MAME, pinned to the `mame0289` release (git submodule).

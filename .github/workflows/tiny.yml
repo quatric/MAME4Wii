@@ -1,0 +1,55 @@
+name: Tiny build
+
+# Build MAME4Wii with only the given driver source files, which leaves more
+# RAM for the emulated system. Run it from the Actions tab.
+
+on:
+  workflow_dispatch:
+    inputs:
+      name:
+        description: "Build name (letters, digits, - and _), e.g. mystwarr"
+        required: true
+      sources:
+        description: "Driver sources under src/mame/, space or comma separated, e.g. konami/mystwarr.cpp"
+        required: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    container: devkitpro/devkitppc:latest
+    steps:
+      - name: Install tools
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends git make zip python3 ca-certificates
+
+      - uses: actions/checkout@v4
+
+      - name: Create the driver group
+        env:
+          NAME: ${{ inputs.name }}
+          SOURCES: ${{ inputs.sources }}
+        run: |
+          case "$NAME" in *[!A-Za-z0-9_-]*|"") echo "invalid name"; exit 1 ;; esac
+          [ ! -e "groups/$NAME.txt" ] || { echo "name clashes with an existing group"; exit 1; }
+          {
+            echo "# description: Tiny build ($NAME)"
+            for s in $(echo "$SOURCES" | tr ',' ' '); do
+              case "$s" in *[!A-Za-z0-9_./-]*|*..*) echo "invalid source: $s" >&2; exit 1 ;; esac
+              echo "$s"
+            done
+          } > "groups/$NAME.txt"
+          cat "groups/$NAME.txt"
+
+      - name: Build
+        env:
+          NAME: ${{ inputs.name }}
+        run: |
+          git config --global --add safe.directory '*'
+          ./build.sh "$NAME"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: mame4wii-tiny-${{ inputs.name }}
+          path: dist/mame4wii-*.zip
+          if-no-files-found: error
